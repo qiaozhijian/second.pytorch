@@ -120,7 +120,6 @@ def _extend_matrix(mat):
     mat = np.concatenate([mat, np.array([[0., 0., 0., 1.]])], axis=0)
     return mat
 
-
 def get_kitti_image_info(path,
                          training=True,
                          label_info=True,
@@ -154,7 +153,7 @@ def get_kitti_image_info(path,
             label_path = get_label_path(idx, path, training, relative_path)
             if relative_path:
                 label_path = str(root_path / label_path)
-            annotations = get_label_anno(label_path)
+            annotations = get_label_anno(label_path)    #index 区分了物体和don't care
         if calib:
             calib_path = get_calib_path(
                 idx, path, training, relative_path=False)
@@ -204,6 +203,7 @@ def get_kitti_image_info(path,
             image_info['calib/Tr_imu_to_velo'] = Tr_imu_to_velo
         if annotations is not None:
             image_info['annos'] = annotations
+            # 每个目标有一个难度等级
             add_difficulty_to_annos(image_info)
         return image_info
 

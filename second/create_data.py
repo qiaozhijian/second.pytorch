@@ -1,10 +1,14 @@
 import copy
 import pathlib
 import pickle
-
+from tqdm import tqdm
 import fire
 import numpy as np
 from skimage import io as imgio
+
+import os
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__),'../'))
 
 from second.core import box_np_ops
 from second.core.point_cloud.point_cloud_ops import bound_points_jit
@@ -26,7 +30,7 @@ def _read_imageset_file(path):
 
 
 def _calculate_num_points_in_gt(data_path, infos, relative_path, remove_outside=True, num_features=4):
-    for info in infos:
+    for info in tqdm(infos):
         if relative_path:
             v_path = str(pathlib.Path(data_path) / info["velodyne_path"])
         else:
@@ -36,7 +40,7 @@ def _calculate_num_points_in_gt(data_path, infos, relative_path, remove_outside=
         rect = info['calib/R0_rect']
         Trv2c = info['calib/Tr_velo_to_cam']
         P2 = info['calib/P2']
-        if remove_outside:
+        if remove_outside:#计算出在视觉图像内的点云
             points_v = box_np_ops.remove_outside_points(points_v, rect, Trv2c, P2,
                                                         info["img_shape"])
 
@@ -52,13 +56,22 @@ def _calculate_num_points_in_gt(data_path, infos, relative_path, remove_outside=
         gt_boxes_lidar = box_np_ops.box_camera_to_lidar(
             gt_boxes_camera, rect, Trv2c)
         indices = box_np_ops.points_in_rbbox(points_v[:, :3], gt_boxes_lidar)
-        num_points_in_gt = indices.sum(0)
+        num_points_in_gt = indices.sum(0)   #计算出每个物体真值框内点云的个数
         num_ignored = len(annos['dimensions']) - num_obj
         num_points_in_gt = np.concatenate(
             [num_points_in_gt, -np.ones([num_ignored])])
         annos["num_points_in_gt"] = num_points_in_gt.astype(np.int32)
 
-
+# 储存所有样本信息，包括
+# + 编号
+# + 点特征数
+# + 点云，图像路径
+# + 图像大小
+# + 畸变，投影，坐标系变换参数
+# + 点云里每个label的信息
+#   + 数据集里的原始label信息
+#   + labels编号和物体编号，以及对应难度
+#   + 每个相机视野内物体内点云的个数
 def create_kitti_info_file(data_path,
                            save_path=None,
                            create_trainval=False,
@@ -165,7 +178,7 @@ def _create_reduced_point_cloud(data_path,
         with open(save_filename, 'w') as f:
             points_v.tofile(f)
 
-
+# 储存出现在相机视野内的点云
 def create_reduced_point_cloud(data_path,
                                train_info_path=None,
                                val_info_path=None,
@@ -190,7 +203,7 @@ def create_reduced_point_cloud(data_path,
         _create_reduced_point_cloud(
             data_path, test_info_path, save_path, back=True)
 
-
+#将所有真值物体的信息都按照种类进行存储，每个种类的存储下有所有的该种类物体信息，包括种类名字，点云路径，所属点云编号，真值框，点云个数，难度，物体编号，得分
 def create_groundtruth_database(data_path,
                                 info_path=None,
                                 used_classes=None,
@@ -262,7 +275,7 @@ def create_groundtruth_database(data_path,
             filename = f"{image_idx}_{names[i]}_{gt_idxes[i]}.bin"
             filepath = database_save_path / filename
             gt_points = points[point_indices[:, i]]
-
+            # 去中心化的真值点云
             gt_points[:, :3] -= rbbox_lidar[i, :3]
             with open(filepath, 'w') as f:
                 gt_points.tofile(f)
