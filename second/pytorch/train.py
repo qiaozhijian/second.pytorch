@@ -115,11 +115,11 @@ def train(config_path,
 
     class_names = list(input_cfg.class_names)
     ######################
-    # BUILD VOXEL GENERATOR
+    # 初始化体素化参数，z轴方向就一个体素，称为pillar
     ######################
     voxel_generator = voxel_builder.build(model_cfg.voxel_generator)
     ######################
-    # BUILD TARGET ASSIGNER
+    # BUILD TARGET ASSIGNER 设置anchor的一些参数
     ######################
     bv_range = voxel_generator.point_cloud_range[[0, 1, 3, 4]]
     box_coder = box_coder_builder.build(model_cfg.box_coder)

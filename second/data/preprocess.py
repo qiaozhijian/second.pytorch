@@ -143,9 +143,12 @@ def prep_pointcloud(input_dict,
             difficulty = difficulty[keep_mask]
             if group_ids is not None:
                 group_ids = group_ids[keep_mask]
+        #目的就是得到在label中的gt是不是我们所需要的gt，比如gt对car,tram等都会进行标注，但是实际上，我们使用仅仅是对car进行回归，所以我们这里的gt_boxes_mask 的shape为[n,1]=[true,false]
         gt_boxes_mask = np.array(
             [n in class_names for n in gt_names], dtype=np.bool_)
+        # 在真值数据库里随机采样一些当前需要训练的物体
         if db_sampler is not None:
+            # 仅仅是对需要检测的classes进行增广
             sampled_dict = db_sampler.sample_all(
                 root_path,
                 gt_boxes,
@@ -229,13 +232,15 @@ def prep_pointcloud(input_dict,
 
     # [0, -40, -3, 70.4, 40, 1]
     voxel_size = voxel_generator.voxel_size
-    pc_range = voxel_generator.point_cloud_range
-    grid_size = voxel_generator.grid_size
-    # [352, 400]
+    pc_range = voxel_generator.point_cloud_range #[0, -39.68, -3, 69.12, 39.68, 1]
+    grid_size = voxel_generator.grid_size    # 体素坐标系大小, [432, 496]
+
 
     voxels, coordinates, num_points = voxel_generator.generate(
         points, max_voxels)
-
+    # voxel：[N, 100, 4] 实际生成的pillar变量;
+    # num_points，[N] 每个pillar中有多少个点;
+    # coordinates，[N, 3] pillar在体素坐标系下的索引
     example = {
         'voxels': voxels,
         'num_points': num_points,
@@ -247,7 +252,7 @@ def prep_pointcloud(input_dict,
         'Trv2c': Trv2c,
         'P2': P2,
     })
-    # if not lidar_input:
+    # if not lidar_input: out_size_factor=2, 根据out_size_factor（在config文件中设置的下采样因子）计算feature_map的size
     feature_map_size = grid_size[:2] // out_size_factor
     feature_map_size = [*feature_map_size, 1][::-1]
     if anchor_cache is not None:
@@ -287,7 +292,7 @@ def prep_pointcloud(input_dict,
         example["bev_map"] = bev_map
     if not training:
         return example
-    if create_targets:
+    if create_targets: # create_targets，也就是把gt和anchor联系起来的操作
         targets_dict = target_assigner.assign(
             anchors,
             gt_boxes,
@@ -296,7 +301,7 @@ def prep_pointcloud(input_dict,
             matched_thresholds=matched_thresholds,
             unmatched_thresholds=unmatched_thresholds)
         example.update({
-            'labels': targets_dict['labels'],
+            'labels': targets_dict['labels'],#label为0时是背景，为1时是前景
             'reg_targets': targets_dict['bbox_targets'],
             'reg_weights': targets_dict['bbox_outside_weights'],
         })
@@ -351,6 +356,7 @@ def _read_and_prep_v9(info, root_path, num_point_features, prep_func):
         })
         if 'group_ids' in annos:
             input_dict['group_ids'] = annos["group_ids"]
+    # 筛选固定类的anchor真值
     example = prep_func(input_dict=input_dict)
     example["image_idx"] = image_idx
     example["image_shape"] = input_dict["image_shape"]

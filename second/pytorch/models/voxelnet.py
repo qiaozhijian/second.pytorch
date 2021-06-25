@@ -1,7 +1,7 @@
 import time
 from enum import Enum
 from functools import reduce
-
+import pandas as pd
 import numpy as np
 import sparseconvnet as scn
 import torch
@@ -451,19 +451,19 @@ class RPN(nn.Module):
         if use_direction_classifier:
             self.conv_dir_cls = nn.Conv2d(
                 sum(num_upsample_filters), num_anchor_per_loc * 2, 1)
-
+    # input x: [2,f_dims,voxel_w, voxel_h]
     def forward(self, x, bev=None):
-        x = self.block1(x)
-        up1 = self.deconv1(x)
+        x = self.block1(x) # [2, f_dims, voxel_w//2, voxel_h//2]
+        up1 = self.deconv1(x) # [2, f_dims*2, voxel_w//2, voxel_h//2]
         if self._use_bev:
             bev[:, -1] = torch.clamp(
                 torch.log(1 + bev[:, -1]) / np.log(16.0), max=1.0)
             x = torch.cat([x, self.bev_extractor(bev)], dim=1)
-        x = self.block2(x)
-        up2 = self.deconv2(x)
-        x = self.block3(x)
-        up3 = self.deconv3(x)
-        x = torch.cat([up1, up2, up3], dim=1)
+        x = self.block2(x) # [2, f_dims*2, voxel_w//4, voxel_h//4]
+        up2 = self.deconv2(x)# [2, f_dims*2, voxel_w//2, voxel_h//2]
+        x = self.block3(x)# [2, f_dims*4, voxel_w//8, voxel_h//8]
+        up3 = self.deconv3(x)# [2, f_dims*2, voxel_w//2, voxel_h//2]
+        x = torch.cat([up1, up2, up3], dim=1)# [2, f_dims*6, voxel_w//2, voxel_h//2]
         box_preds = self.conv_box(x)
         cls_preds = self.conv_cls(x)
         # [N, C, y(H), x(W)]
@@ -474,7 +474,7 @@ class RPN(nn.Module):
             "cls_preds": cls_preds,
         }
         if self._use_direction_classifier:
-            dir_cls_preds = self.conv_dir_cls(x)
+            dir_cls_preds = self.conv_dir_cls(x)# [2, 4, voxel_w//2, voxel_h//2]
             dir_cls_preds = dir_cls_preds.permute(0, 2, 3, 1).contiguous()
             ret_dict["dir_cls_preds"] = dir_cls_preds
         return ret_dict
@@ -656,19 +656,21 @@ class VoxelNet(nn.Module):
     def forward(self, example):
         """module's forward should always accept dict and return loss.
         """
-        voxels = example["voxels"]
-        num_points = example["num_points"]
-        coors = example["coordinates"]
+        voxels = example["voxels"] #含有点云的pillar以及信息
+        num_points = example["num_points"] #每个pillar内点的个数
+        coors = example["coordinates"] #every pillar在voxel map上的索引
+        # default：[248,216]的特征图上每个像素都有2个anchor，位置对应原图的位置
         batch_anchors = example["anchors"]
+
         batch_size_dev = batch_anchors.shape[0]
         t = time.time()
-        # features: [num_voxels, max_num_points_per_voxel, 7]
+        # features(voxel): [num_voxels, max_num_points_per_voxel, 7]; voxel_features [num_voxels, 64]
         # num_points: [num_voxels]
         # coors: [num_voxels, 4]
         voxel_features = self.voxel_feature_extractor(voxels, num_points, coors)
         if self._use_sparse_rpn:
             preds_dict = self.sparse_rpn(voxel_features, coors, batch_size_dev)
-        else:
+        else:#spatial_features [batch, 64, voxel_w, voxel_h]
             spatial_features = self.middle_feature_extractor(
                 voxel_features, coors, batch_size_dev)
             if self._use_bev:
@@ -676,7 +678,7 @@ class VoxelNet(nn.Module):
             else:
                 preds_dict = self.rpn(spatial_features)
         # preds_dict["voxel_features"] = voxel_features
-        # preds_dict["spatial_features"] = spatial_features
+        # preds_dict["spatial_features"] = spatial_features #box_preds [batch, feature_w, feature_h, 14] cls_preds [batch, feature_w, feature_h, 2] dir_cls_preds [batch, feature_w, feature_h, 4] one_hot形式
         box_preds = preds_dict["box_preds"]
         cls_preds = preds_dict["cls_preds"]
         self._total_forward_time += time.time() - t
@@ -716,7 +718,7 @@ class VoxelNet(nn.Module):
             cls_loss_reduced *= self._cls_loss_weight
             loss = loc_loss_reduced + cls_loss_reduced
             if self._use_direction_classifier:
-                dir_targets = get_direction_target(example['anchors'],
+                dir_targets = get_direction_target(example['anchors'], #one_hot
                                                    reg_targets)
                 dir_logits = preds_dict["dir_cls_preds"].view(
                     batch_size_dev, -1, 2)
@@ -789,7 +791,7 @@ class VoxelNet(nn.Module):
                 if a_mask is not None:
                     dir_preds = dir_preds[a_mask]
                 # print(dir_preds.shape)
-                dir_labels = torch.max(dir_preds, dim=-1)[1]
+                dir_labels = torch.max(dir_preds, dim=-1)[1] #取one-hot的id
             if self._encode_background_as_zeros:
                 # this don't support softmax
                 assert self._use_sigmoid_score is True

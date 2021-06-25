@@ -92,7 +92,7 @@ class PillarFeatureNet(nn.Module):
 
         # Create PillarFeatureNet layers
         num_filters = [num_input_features] + list(num_filters)
-        pfn_layers = []
+        pfn_layers = [] #1 layer PFNLayer(in=9, out=64)
         for i in range(len(num_filters) - 1):
             in_filters = num_filters[i]
             out_filters = num_filters[i + 1]
@@ -125,7 +125,7 @@ class PillarFeatureNet(nn.Module):
         if self._with_distance:
             points_dist = torch.norm(features[:, :, :3], 2, 2, keepdim=True)
             features_ls.append(points_dist)
-        features = torch.cat(features_ls, dim=-1)
+        features = torch.cat(features_ls, dim=-1) #[num_pillars, max_num_points, 9]
 
         # The feature decorations were calculated without regard to whether pillar was empty. Need to ensure that
         # empty pillars remain set to zeros.

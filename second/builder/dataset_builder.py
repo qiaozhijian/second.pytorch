@@ -68,7 +68,8 @@ def build(input_reader_config,
     # [352, 400]
     feature_map_size = grid_size[:2] // out_size_factor
     feature_map_size = [*feature_map_size, 1][::-1]
-
+    # partial 函数的功能就是：把一个函数的某些参数给固定住，返回一个新的函数。
+    # 因为prep_pointcloud直接调用需要传入很多参数，作者把很多参数都固定下来
     prep_func = partial(
         prep_pointcloud,
         root_path=cfg.kitti_root_path,
